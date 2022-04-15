@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Data;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -12,10 +13,11 @@ namespace OfferTable
 {
     class Program
     {
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
             var LinkToXMLPage = $"http://partner.market.yandex.ru/pages/help/YML.xml";
             var nodeNameToCollect = "offer";
+            var procedureName = "sp_AddRecord";
             var dbTableName = nodeNameToCollect + "s";
             var dbName = "TDB";
             var conn = new SqlConnection(ConfigurationManager.ConnectionStrings["TestDb"].ConnectionString);
@@ -40,11 +42,17 @@ namespace OfferTable
             }
             var attListDist = attList.Distinct().ToList();
 
+
             CreateTable(conn, dbName, dbTableName, attListDist);
+            CreateProcedure(conn, dbName, procedureName);
 
             var command = conn.CreateCommand();
 
             int totRec = 0;
+            command.CommandType = CommandType.StoredProcedure;
+            command.CommandText = procedureName;
+            Task task=null;
+
             foreach (dynamic of in ofrs)
             {
                 attList.Clear();
@@ -54,7 +62,7 @@ namespace OfferTable
                     if (attList.Contains(at.Name))
                     {
                         var i = attList.IndexOf(at.Name);
-                        attValList[i]+=$"; {at.InnerText.Replace("'", "''")}";
+                        attValList[i] += $"; {at.InnerText.Replace("'", "''")}";
                         continue;
                     }
                     attList.Add(at.Name);
@@ -71,27 +79,35 @@ namespace OfferTable
                     attList.Add(prop.Name);
                     attValList.Add(prop.InnerText.Replace("'", "''"));
                 }
-                var fieldString = $"INSERT INTO [{dbName}].[dbo].[{dbTableName}] (";
-                var valueString = " VALUES (";
+                var fieldString = "";
+                var valueString = "";
                 for (var i = 0; i < attList.Count; i++)
                 {
                     fieldString += $"[{attList[i]}],";
                     valueString += $"'{attValList[i]}',";
                 }
-                command.CommandText = fieldString.Substring(0, fieldString.Length - 1) + ")" + valueString.Substring(0, valueString.Length - 1) + ")";
-                command.ExecuteNonQuery();
+                command.Parameters.Clear();
+                command.Parameters.AddWithValue("@table", dbTableName);
+                command.Parameters.AddWithValue("@fields", fieldString.Substring(0, fieldString.Length - 1));
+                command.Parameters.AddWithValue("@values", valueString.Substring(0, valueString.Length - 1));
+
+                if (task != null) { await task; }
+
+                task = command.ExecuteNonQueryAsync();
                 totRec++;
             }
+            
 
             Timer.Stop();
             Console.WriteLine($"Elapsed time: {Timer.ElapsedMilliseconds:### ### ##0}ms ({Timer.Elapsed:hh\\:mm\\:ss\\.ffff}), Total recurds={totRec}");
         }
 
-        static bool CreateTable(SqlConnection con,string db, string table,List<string> colNames)
+        static bool CreateTable(SqlConnection con, string db, string table, List<string> colNames)
         {
             var com = con.CreateCommand();
             com.CommandText = $"IF object_id('[{db}].[dbo].[{table}]') IS NOT NULL DROP TABLE [{db}].[dbo].[{table}]";
-            com.ExecuteNonQuery();
+            try { com.ExecuteNonQuery(); }
+            catch { return false; }
 
             var TableCol = "";
             foreach (var cn in colNames)
@@ -99,6 +115,28 @@ namespace OfferTable
 
             com.CommandText = $"CREATE TABLE [{db}].[dbo].[{table}] ({TableCol})";
             com.ExecuteNonQuery();
+            return true;
+        }
+
+        static bool CreateProcedure(SqlConnection con, string db, string procName)
+        {
+            var com = con.CreateCommand();
+            com.CommandText = $"IF object_id('[dbo].[{procName}]') IS NOT NULL DROP PROCEDURE [dbo].[" + procName + @"]";
+            try { com.ExecuteNonQuery(); }
+            catch { return false; }
+            com.CommandText = 
+@"CREATE PROCEDURE [dbo].["+ procName + @"]
+@table nvarchar(MAX),
+@fields nvarchar(MAX),
+@values nvarchar(MAX)
+AS
+Declare @com nvarchar(MAX)
+set @com = 'INSERT INTO ' + @table + ' (' + @fields + ') VALUES (' + @values + ')'
+exec(@com)";
+
+            try { com.ExecuteNonQuery(); }
+            catch { return false; }
+
             return true;
         }
 

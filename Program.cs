@@ -29,10 +29,11 @@ namespace OfferTable
             var xmlPage = GetPageFromSite(LinkToXMLPage);
             XmlDocument doc = new XmlDocument();
             doc.LoadXml(xmlPage);
-
             var ofrs = doc.SelectNodes(".//offer");
+
             var attList = new List<string>();
             var attValList = new List<string>();
+            
             foreach (dynamic of in ofrs)
             {
                 foreach (var at in of.Attributes)
